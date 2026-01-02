@@ -1,51 +1,56 @@
 #!/bin/bash
+# =============================
+# AUTO DEPLOY SCRIPT (Node/React + PM2)
+# =============================
 
-# -------------------------------
-# AUTO DEPLOY SCRIPT
-# สำหรับ Node.js + React + PM2
-# -------------------------------
+set -e  # exit on error
 
-echo "===== AUTO DEPLOY START ====="
-date
+LOG_FILE="/var/www/2zuagain-web/logs/deploy.log"
+PROJECT_DIR="/var/www/2zuagain-web"
+APP_NAME="2zuagain-app"
 
-# ไปยัง directory ของ project
-cd /var/www/2zuagain-web || exit 1
+# Create log folder if not exist
+mkdir -p "$(dirname "$LOG_FILE")"
+touch "$LOG_FILE"
+chmod 664 "$LOG_FILE"
+chown www-data:www-data "$LOG_FILE"
 
-# -------------------------------
-# Step 1: Reset local changes
-# -------------------------------
-echo "Resetting any local changes..."
-git fetch --all
-git reset --hard origin/main
-git clean -fd
+echo "===== AUTO DEPLOY START =====" >> "$LOG_FILE"
+date >> "$LOG_FILE"
 
-# -------------------------------
-# Step 2: Pull latest code
-# -------------------------------
-echo "Pulling latest code from GitHub..."
-git pull origin main
+# Switch to project dir
+cd "$PROJECT_DIR"
 
-# -------------------------------
-# Step 3: Setup Node backend
-# -------------------------------
-echo "Installing/updating Node.js backend dependencies..."
-npm install
+# Git safe directory
+sudo -u www-data git config --global --add safe.directory "$PROJECT_DIR" || true
 
-# -------------------------------
-# Step 4: Build frontend React app
-# -------------------------------
-if [ -d "frontend" ]; then
-  echo "Building React frontend..."
-  cd frontend || exit 1
-  npm install
-  npm run build
-  cd ..
+# Reset local changes to avoid merge conflicts
+sudo -u www-data git reset --hard origin/main >> "$LOG_FILE" 2>&1
+
+# Pull latest code
+echo "Pulling latest code..." >> "$LOG_FILE"
+sudo -u www-data git pull origin main >> "$LOG_FILE" 2>&1
+
+# Install Node dependencies
+echo "Installing Node dependencies..." >> "$LOG_FILE"
+sudo -u www-data npm install >> "$LOG_FILE" 2>&1
+
+# Build React frontend if exists
+if [ -f package.json ] && grep -q "react-scripts" package.json; then
+    echo "Building React frontend..." >> "$LOG_FILE"
+    sudo -u www-data npm run build >> "$LOG_FILE" 2>&1
 fi
 
-# -------------------------------
-# Step 5: Restart backend with PM2
-# -------------------------------
-echo "Restarting backend with PM2..."
-pm2 restart 2zuagain || pm2 start server.js --name 2zuagain
+# Restart Node app via PM2
+echo "Restarting Node app via PM2..." >> "$LOG_FILE"
+if pm2 describe "$APP_NAME" > /dev/null 2>&1; then
+    sudo -u www-data pm2 reload "$APP_NAME" >> "$LOG_FILE" 2>&1
+else
+    sudo -u www-data pm2 start server.js --name "$APP_NAME" >> "$LOG_FILE" 2>&1
+fi
 
-echo "===== AUTO DEPLOY END ====="
+# Save PM2 process list
+sudo -u www-data pm2 save >> "$LOG_FILE" 2>&1
+
+echo "===== AUTO DEPLOY END =====" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
